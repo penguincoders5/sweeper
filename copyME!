@@ -1,0 +1,169 @@
+local StartEvent = game.ReplicatedStorage:WaitForChild("StartEvent")
+local EndEvent = game.ReplicatedStorage:WaitForChild("EndEvent")
+
+--define the service we need
+local Players = game:GetService("Players")
+local RS = game:GetService("RunService")
+
+--get the folder and the contents we need from the workspace
+local Sweeper = workspace.Sweeper
+local ProximityPrompt = Sweeper.StartButton.ProximityPrompt
+local Platform = Sweeper.Platform
+local Axle = Sweeper.Axle
+local BottomSweeper = Sweeper.BottomSweeper
+local TopSweeper = Sweeper.TopSweeper
+local BottomStart = BottomSweeper.CFrame
+local TopStart = TopSweeper.CFrame
+
+--keep track of if the game is running
+local started = false
+
+--creates a motor on the axle and the part argument
+function createMotor(part)
+	--create attachments on the Axle and the sweeper given as an argument
+	local PartAttachment = Instance.new("Attachment")
+	local AxleAttachment = Instance.new("Attachment")
+	PartAttachment.Parent = part
+	AxleAttachment.Parent = Axle
+	PartAttachment.WorldCFrame = part.CFrame
+	AxleAttachment.WorldCFrame = part.CFrame
+	
+	--rotate the attachments so they point up (in-line with the axle)
+	PartAttachment.CFrame *= CFrame.Angles(math.rad(0), math.rad(0), math.rad(90))
+	AxleAttachment.CFrame *= CFrame.Angles(math.rad(0), math.rad(0), math.rad(90))
+
+	--create a motor that moves the sweeper relative to the axle
+	local motor = Instance.new("HingeConstraint")
+	motor.Attachment1 = PartAttachment
+	motor.Attachment0 = AxleAttachment
+	motor.ActuatorType = "Motor"
+	--this just needs to be very high so that the motor can move the part no matter how big it is
+	motor.MotorMaxTorque = 100000000000000
+	motor.AngularVelocity = 0
+	motor.Parent = Axle
+	
+	--unanchor the part so it can be moved by the motor once the game starts
+	part.Anchored = false
+	
+	--return the motor created by the function
+	return motor
+end
+
+--call the function we made on each sweeper
+local TopMotor = createMotor(TopSweeper)
+local BottomMotor = createMotor(BottomSweeper)
+
+--speeds up the top and bottom motors
+local function speedUp()
+	-- only run if the game is started
+	if started then
+		--increase each sweepers speed by a small increment
+		TopMotor.AngularVelocity += 0.001
+		BottomMotor.AngularVelocity -= 0.002
+	end
+end
+
+local function startGame()
+	--create a list of survivors from the current players	
+	survivors = Players:GetPlayers()
+
+	--fire the StartEvent
+	StartEvent:FireAllClients()
+
+	--go through all the players
+	for i, player in Players:GetPlayers() do
+		local newPosition
+
+		--Spread the players evenly along the platform, 5 studs up
+		if i % 2 == 0 then
+			newPosition = Platform.Position + Vector3.new(2 * (i-1), 5, 10)
+		else 
+			newPosition = Platform.Position + Vector3.new(-2 * i, 5, 10)
+		end
+		local hum = player.Character.HumanoidRootPart
+
+		--move each player to their position, looking at the bottom sweeper
+		hum.CFrame = CFrame.new(newPosition, BottomSweeper.Position)
+
+		--anchor them during the countdown
+		hum.Anchored = true
+	end
+	wait (3)
+	
+	TopMotor.AngularVelocity = 0.5
+	BottomMotor.AngularVelocity = -1
+
+	--unanchor all the players
+	for i, player in Players:GetPlayers() do
+		player.Character.HumanoidRootPart.Anchored = false
+	end
+	started = true
+end
+
+--start the game when the start button is triggered
+ProximityPrompt.Triggered:Connect(startGame)
+
+--run the speedUp function every tick
+RS.Heartbeat:Connect(speedUp)
+
+--TESTING BREAK
+--Test the start of your game!(It won't have an end yet)
+
+--fires the end event when the game is over and adds sparkles to the winner
+local function endGame(Player)
+	started = false
+	
+	--stop the motors
+	TopMotor.AngularVelocity = 0
+	BottomMotor.AngularVelocity = 0
+	
+	--reset the sweepers to their original positions
+	TopSweeper.CFrame = TopStart
+	BottomSweeper.CFrame = BottomStart
+
+	--fire the EndEvent for every player, with the winner as an argument
+	EndEvent:FireAllClients(Player)
+
+	--check if there actually is a winner
+	if Player then
+		--add sparkles to the winner
+		local sparkles = Instance.new("Sparkles")
+		sparkles.Parent = Player.Character.HumanoidRootPart
+		wait(5)
+
+		--remove the sparkles
+		sparkles:Destroy()
+	end
+end
+
+--eliminates a player based on their number in the table
+local function eliminatePlayer(playerNum)
+
+	--remove that player from the survivors table
+	table.remove(survivors, playerNum)
+
+	--check if there is only 1 survivor in the game (that player wins)
+	if #survivors == 1 then
+		endGame(survivors[1])
+
+		--check if there are 0 survivors in the game (no player wins)
+	elseif #survivors < 1 then
+		endGame(nil)
+	end
+end
+
+--checks if a player needs to be eliminated
+local function checkSurvivors()
+	if started then
+		--go through all the players, checking if they fell off the log
+		for i, player in survivors do
+			--check if their Y position is too low
+			if player.Character.HumanoidRootPart.Position.Y < 5 then
+				eliminatePlayer(i)
+			end
+		end
+	end
+end
+
+--check for survivors every tick
+RS.Heartbeat:Connect(checkSurvivors)
